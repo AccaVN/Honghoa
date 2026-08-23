@@ -276,6 +276,18 @@ function createApp(db, auth) {
     await run("INSERT INTO sizes(id,name,sort_order) VALUES (?,?,?)", [id, name, maxRow.m + 1]);
     res.status(201).json({ id, name });
   }));
+  app.put("/api/admin/sizes/:id", requireRole("admin", "moderator"), h(async (req, res) => {
+    const name = (req.body?.name || "").trim();
+    if (!name) return res.status(400).json({ error: "Tên size không được để trống." });
+    const existing = await get("SELECT 1 FROM sizes WHERE id=?", [req.params.id]);
+    if (!existing) return res.status(404).json({ error: "Không tìm thấy size." });
+    if (await get("SELECT 1 FROM sizes WHERE name=? AND id<>?", [name, req.params.id])) return res.status(409).json({ error: "Size này đã tồn tại." });
+    await run("UPDATE sizes SET name=? WHERE id=?", [name, req.params.id]);
+    // Đồng bộ tên size đã lưu (denormalized) trên các món đang dùng size này, để danh sách món
+    // và đơn hàng cũ hiển thị đúng tên mới ngay lập tức thay vì giữ tên cũ.
+    await run("UPDATE product_sizes SET size_name=? WHERE size_id=?", [name, req.params.id]);
+    res.json({ ok: true });
+  }));
   app.delete("/api/admin/sizes/:id", requireRole("admin", "moderator"), h(async (req, res) => {
     if (await get("SELECT 1 FROM product_sizes WHERE size_id=?", [req.params.id])) {
       return res.status(409).json({ error: "Không thể xoá — size này đang được dùng cho món. Hãy đổi size của các món đó trước." });
