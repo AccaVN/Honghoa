@@ -774,68 +774,87 @@ function exportOrdersExcel() {
 
 /* ---- In bill / in tem ---- */
 function printHtml(html) {
-  // In-app print mode: replace the entire document with a standalone print document.
-  // This is more reliable on iPhone/iPad Safari than window.open()/popup fallbacks,
-  // which can cause Safari to preview the current Admin page instead of the bill.
-  const originalHtml = document.documentElement.innerHTML;
-  const originalTitle = document.title;
+  /*
+   * iPhone/iPad Safari: window.open() + print() can print the opener/Admin page
+   * instead of the popup document. To avoid that completely, replace the current
+   * document with a print-only document, print it, then reload the app afterward.
+   */
   const printStyles = `
-    @page { size: 72mm auto; margin: 4mm; }
+    @page { margin: 6mm; size: auto; }
     * { box-sizing: border-box; }
-    html, body { margin:0 !important; padding:0 !important; width:100%; background:#fff !important; color:#000 !important; }
+    html, body { margin:0 !important; padding:0 !important; background:#fff !important; color:#000 !important; }
     body { -webkit-print-color-adjust: exact; print-color-adjust: exact; }
-    .print-document { width:72mm; max-width:72mm; margin:0 auto; padding:0; font-family:Arial,Helvetica,sans-serif; color:#000; }
-    .bill { width:100%; max-width:72mm; margin:0 auto; font-family:'Courier New',monospace; color:#000; }
+    .print-page { width:100%; margin:0; }
+    .bill { width:72mm; max-width:72mm; margin:0 auto; font-family:'Courier New',monospace; color:#000; }
     .bill h2{text-align:center;margin:0 0 2px;font-size:16px}
     .bill .bill-sub{text-align:center;font-size:10.5px;margin:0 0 8px}
     .bill hr{border:none;border-top:1px dashed #000;margin:6px 0}
     .bill-row{display:flex;justify-content:space-between;font-size:11.5px;margin:2px 0;gap:8px}
-    .bill-row span:last-child{max-width:62%;text-align:right;word-break:break-word}
-    .bill-table{width:100%;border-collapse:collapse;margin:6px 0;font-size:11px;table-layout:fixed}
+    .bill-table{width:100%;border-collapse:collapse;margin:6px 0;font-size:11px}
     .bill-table td{padding:3px 0;vertical-align:top}
-    .bill-table td:first-child{width:auto;word-break:break-word}
     .bill-table td.qty{text-align:center;width:24px}
-    .bill-table td.amt{text-align:right;width:72px;white-space:nowrap}
-    .bill-item-opts{font-size:10px;color:#333;line-height:1.25}
+    .bill-table td.amt{text-align:right;white-space:nowrap}
+    .bill-item-opts{font-size:10px;color:#333}
     .bill-total-row{display:flex;justify-content:space-between;font-size:15px;font-weight:900;margin-top:6px}
     .bill-thanks{text-align:center;margin-top:14px;font-size:11.5px}
     .labels-wrap{display:flex;flex-direction:column;gap:3mm;align-items:flex-start}
-    .label{width:62mm;min-height:40mm;border:1px dashed #999;padding:7px 8px;font-family:Arial,sans-serif;page-break-inside:avoid;break-inside:avoid;overflow:hidden}
+    .label{width:6.2cm;min-height:4cm;border:1px dashed #999;padding:7px 8px;font-family:Arial,sans-serif;page-break-inside:avoid;break-inside:avoid;overflow:hidden}
     .label-code{font-weight:900;font-size:11px;letter-spacing:.5px}
     .label-name{font-weight:800;font-size:15px;margin:3px 0 2px;line-height:1.15}
     .label-size{font-size:12px;font-weight:700}
     .label-opts{font-size:11px;color:#333;margin-top:2px}
     .label-top{font-size:10.5px;color:#333}
     .label-note{font-size:10.5px;font-style:italic;margin-top:3px}
+    .print-back {
+      position:fixed; top:12px; right:12px; z-index:99999;
+      border:1px solid #bbb; border-radius:8px; background:#fff;
+      padding:8px 12px; font:14px Arial,sans-serif; color:#111;
+    }
+    @media print {
+      .print-back { display:none !important; }
+    }
   `;
 
-  document.title = "Café Hồng Hoa - In";
-  document.documentElement.innerHTML = `<!doctype html><html lang="vi"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Café Hồng Hoa - In</title><style>${printStyles}</style></head><body><main class="print-document">${html}</main></body></html>`;
+  // Build the print-only document in the SAME tab. This is intentional:
+  // iOS Safari can ignore a popup's document and print the opener instead.
+  document.open();
+  document.write(`<!doctype html>
+<html lang="vi">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>In Café Hồng Hoa</title>
+<style>${printStyles}</style>
+</head>
+<body>
+<button class="print-back" onclick="location.reload()">← Quay lại quản lý</button>
+<div class="print-page">${html}</div>
+</body>
+</html>`);
+  document.close();
 
-  let restored = false;
-  const restore = () => {
-    if (restored) return;
-    restored = true;
-    window.removeEventListener("afterprint", restore);
-    document.documentElement.innerHTML = originalHtml;
-    document.title = originalTitle;
-    // Re-bind the app state/UI after restoring the DOM.
-    try { boot(); } catch (_) {}
+  // Give Safari one render cycle before opening the native print sheet.
+  const startPrint = () => {
+    setTimeout(() => {
+      try {
+        window.focus();
+        window.print();
+      } catch (_) {}
+    }, 500);
   };
 
-  window.addEventListener("afterprint", restore, { once: true });
-  setTimeout(() => {
-    try {
-      window.focus();
-      window.print();
-    } catch (_) {
-      restore();
-    }
-    // Safety fallback for browsers that don't fire afterprint.
-    setTimeout(restore, 10000);
-  }, 100);
-}
+  // Reload the original application after the print sheet closes.
+  let restored = false;
+  const restoreApp = () => {
+    if (restored) return;
+    restored = true;
+    setTimeout(() => location.reload(), 100);
+  };
+  window.addEventListener("afterprint", restoreApp, { once: true });
 
+  if (document.readyState === "complete") startPrint();
+  else window.addEventListener("load", startPrint, { once: true });
+}
 function findOrder(id) { return lastLoadedOrders.find((o) => o.id === id); }
 function printBill(id) {
   const o = findOrder(id);
