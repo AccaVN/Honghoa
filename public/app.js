@@ -98,7 +98,18 @@ async function boot() {
     root.innerHTML = `<div style="padding:60px;text-align:center;color:#b3261e">Không kết nối được tới máy chủ. Vui lòng kiểm tra server đang chạy.</div>`;
   }
 }
-async function refreshMenu() { menu = await api("GET", "/api/menu"); }
+async function refreshMenu() {
+  // Không dùng cache ở trang quản trị: sau khi sửa món/size phải lấy dữ liệu mới nhất từ DB.
+  const res = await fetch("/api/menu?_=" + Date.now(), {
+    credentials: "same-origin",
+    cache: "no-store",
+    headers: { "Cache-Control": "no-cache" }
+  });
+  const data = await res.json();
+  if (!res.ok) throw new Error(data?.error || "Không tải được thực đơn mới nhất.");
+  menu = data;
+  return menu;
+}
 
 function render() { view === "customer" ? renderCustomer() : renderAdmin(); }
 
@@ -501,12 +512,12 @@ async function saveProduct() {
     let savedId = editingProductId;
     if (editingProductId) await api("PUT", "/api/admin/products/" + editingProductId, payload);
     else { const created = await api("POST", "/api/admin/products", payload); savedId = created && created.id; }
+    // Lấy lại menu từ server với cache-busting trước khi vẽ danh sách.
     await refreshMenu();
     editingProductId = null;
     renderAdmin();
-    toast("Đã lưu món.", "success");
-    // renderAdmin() dựng lại danh sách bất đồng bộ; chờ DOM có dòng mới rồi mới cuộn/highlight.
-    if (savedId) setTimeout(() => highlightProductRow(savedId), 50);
+    toast("Đã lưu món và cập nhật danh sách.", "success");
+    if (savedId) setTimeout(() => highlightProductRow(savedId), 80);
   } catch (e) { toast(e.message, "error"); }
 }
 /** Sau khi lưu món, danh sách bên dưới được vẽ lại toàn bộ — nếu admin đang cuộn xuống giữa
@@ -571,9 +582,14 @@ async function addSize() {
   try { await api("POST", "/api/admin/sizes", { name }); await refreshMenu(); renderAdmin(); toast("Đã thêm size.", "success"); } catch (e) { toast(e.message, "error"); }
 }
 async function renameSize(id, currentName) {
-  const name = await showPrompt("Sửa tên size", { title: "Sửa tên size", value: currentName, placeholder: "Tên size" });
+  const name = await showPrompt("Nhập tên size mới:", { title: "Sửa tên size", placeholder: "Ví dụ: M, L, XL", value: currentName });
   if (!name || name === currentName) return;
-  try { await api("PUT", "/api/admin/sizes/" + id, { name }); await refreshMenu(); renderAdmin(); toast("Đã sửa tên size.", "success"); } catch (e) { toast(e.message, "error"); }
+  try {
+    await api("PUT", "/api/admin/sizes/" + id, { name });
+    await refreshMenu();
+    renderAdmin();
+    toast("Đã sửa tên size và cập nhật các món đang dùng size này.", "success");
+  } catch (e) { toast(e.message, "error"); }
 }
 async function removeSize(id) {
   if (!(await showConfirm("Xoá size này?", { danger: true }))) return;
@@ -751,62 +767,61 @@ function exportOrdersExcel() {
 
 /* ---- In bill / in tem ---- */
 function printHtml(html) {
-  // Trên điện thoại, đặc biệt iOS Safari, in một phần tử được tạo động trong SPA
-  // đôi khi vẫn lấy giao diện hiện tại thay vì nội dung bill/tem. Mở một trang in
-  // độc lập ngay từ thao tác bấm nút sẽ ổn định hơn và cho phép Safari/Chrome in đúng nội dung.
-  const printWindow = window.open("", "_blank");
+  // Luôn tạo một tài liệu in độc lập. Cách này tránh CSS/layout của trang Admin
+  // lọt vào bản in trên iPhone/Android và đặc biệt tránh in nhầm toàn bộ trang.
+  const printWindow = window.open("about:blank", "_blank");
+  const printStyles = `
+    @page { margin: 6mm; size: auto; }
+    * { box-sizing: border-box; }
+    html, body { margin:0 !important; padding:0 !important; background:#fff !important; color:#000 !important; }
+    body { -webkit-print-color-adjust:exact; print-color-adjust:exact; }
+    .bill { width:72mm; max-width:72mm; margin:0 auto; font-family:'Courier New',monospace; color:#000; }
+    .bill h2{text-align:center;margin:0 0 2px;font-size:16px}
+    .bill .bill-sub{text-align:center;font-size:10.5px;margin:0 0 8px}
+    .bill hr{border:none;border-top:1px dashed #000;margin:6px 0}
+    .bill-row{display:flex;justify-content:space-between;font-size:11.5px;margin:2px 0;gap:8px}
+    .bill-table{width:100%;border-collapse:collapse;margin:6px 0;font-size:11px}
+    .bill-table td{padding:3px 0;vertical-align:top}
+    .bill-table td.qty{text-align:center;width:24px}
+    .bill-table td.amt{text-align:right;white-space:nowrap}
+    .bill-item-opts{font-size:10px;color:#333}
+    .bill-total-row{display:flex;justify-content:space-between;font-size:15px;font-weight:900;margin-top:6px}
+    .bill-thanks{text-align:center;margin-top:14px;font-size:11.5px}
+    .labels-wrap{display:flex;flex-direction:column;gap:3mm;align-items:flex-start}
+    .label{width:6.2cm;min-height:4cm;border:1px dashed #999;padding:7px 8px;font-family:Arial,sans-serif;page-break-inside:avoid;break-inside:avoid;overflow:hidden}
+    .label-code{font-weight:900;font-size:11px;letter-spacing:.5px}
+    .label-name{font-weight:800;font-size:15px;margin:3px 0 2px;line-height:1.15}
+    .label-size{font-size:12px;font-weight:700}
+    .label-opts{font-size:11px;color:#333;margin-top:2px}
+    .label-top{font-size:10.5px;color:#333}
+    .label-note{font-size:10.5px;font-style:italic;margin-top:3px}
+  `;
   if (printWindow) {
-    const printStyles = `
-      @page { margin: 8mm; }
-      * { box-sizing: border-box; }
-      html, body { margin:0; padding:0; background:#fff; color:#000; }
-      body { padding:0; }
-      .bill { width:280px; margin:0 auto; font-family:'Courier New',monospace; color:#000; }
-      .bill h2{text-align:center;margin:0 0 2px;font-size:16px}
-      .bill .bill-sub{text-align:center;font-size:10.5px;margin:0 0 8px}
-      .bill hr{border:none;border-top:1px dashed #000;margin:6px 0}
-      .bill-row{display:flex;justify-content:space-between;font-size:11.5px;margin:2px 0;gap:8px}
-      .bill-table{width:100%;border-collapse:collapse;margin:6px 0;font-size:11px}
-      .bill-table td{padding:3px 0;vertical-align:top}
-      .bill-table td.qty{text-align:center;width:24px}
-      .bill-table td.amt{text-align:right;white-space:nowrap}
-      .bill-item-opts{font-size:10px;color:#333}
-      .bill-total-row{display:flex;justify-content:space-between;font-size:15px;font-weight:900;margin-top:6px}
-      .bill-thanks{text-align:center;margin-top:14px;font-size:11.5px}
-      .labels-wrap{display:flex;flex-wrap:wrap;gap:3mm;align-items:flex-start}
-      .label{width:6.2cm;min-height:4cm;border:1px dashed #999;padding:7px 8px;box-sizing:border-box;font-family:Arial,sans-serif;page-break-inside:avoid;break-inside:avoid}
-      .label-code{font-weight:900;font-size:11px;letter-spacing:.5px}
-      .label-name{font-weight:800;font-size:15px;margin:3px 0 2px;line-height:1.15}
-      .label-size{font-size:12px;font-weight:700}
-      .label-opts{font-size:11px;color:#333;margin-top:2px}
-      .label-top{font-size:10.5px;color:#333}
-      .label-note{font-size:10.5px;font-style:italic;margin-top:3px}
-      @media print { body { -webkit-print-color-adjust: exact; print-color-adjust: exact; } }
-    `;
     printWindow.document.open();
-    printWindow.document.write(`<!doctype html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>In Café Hồng Hoa</title><style>${printStyles}</style></head><body>${html}</body></html>`);
+    printWindow.document.write(`<!doctype html><html lang="vi"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>In Café Hồng Hoa</title><style>${printStyles}</style></head><body>${html}</body></html>`);
     printWindow.document.close();
-    setTimeout(() => {
-      try { printWindow.focus(); printWindow.print(); } catch (_) {}
-    }, 350);
+    const doPrint = () => setTimeout(() => { try { printWindow.focus(); printWindow.print(); } catch (_) {} }, 150);
+    if (printWindow.document.readyState === "complete") doPrint();
+    else printWindow.addEventListener("load", doPrint, { once: true });
     return;
   }
 
-  // Fallback nếu trình duyệt chặn popup: dùng printArea của trang hiện tại.
+  // Popup bị chặn: fallback sang vùng in riêng của chính trang hiện tại.
   const area = document.getElementById("printArea");
   const rootEl = document.getElementById("root");
-  area.innerHTML = html;
+  area.innerHTML = `<style>${printStyles}</style>${html}`;
   rootEl.style.setProperty("display", "none", "important");
   area.style.setProperty("display", "block", "important");
   document.body.classList.add("printing");
-  function cleanup() {
+  const cleanup = () => {
+    document.body.classList.remove("printing");
     rootEl.style.removeProperty("display");
     area.style.removeProperty("display");
-    document.body.classList.remove("printing");
+    area.innerHTML = "";
     window.removeEventListener("afterprint", cleanup);
-  }
-  window.addEventListener("afterprint", cleanup);
-  requestAnimationFrame(() => requestAnimationFrame(() => window.print()));
+  };
+  window.addEventListener("afterprint", cleanup, { once: true });
+  requestAnimationFrame(() => requestAnimationFrame(() => { window.print(); setTimeout(cleanup, 4000); }));
 }
 function findOrder(id) { return lastLoadedOrders.find((o) => o.id === id); }
 function printBill(id) {
