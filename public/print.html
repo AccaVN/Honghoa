@@ -37,14 +37,26 @@
     #actions button { border:0; border-radius:8px; padding:9px 14px; font-size:15px; background:#111; color:#fff; }
     #actions button.secondary { background:#eee; color:#111; }
     .has-actions { padding-top:58px; }
+    #chromeIosBanner { display:none; position:fixed; top:0; left:0; right:0; z-index:20; background:#fff3cd; color:#5a4200; padding:12px 14px; font-size:13.5px; line-height:1.5; border-bottom:1px solid #f0d98c; }
+    #chromeIosBanner a.safari-btn { display:inline-block; margin-top:8px; background:#111; color:#fff; text-decoration:none; padding:8px 14px; border-radius:8px; font-size:14px; }
+    .has-banner { padding-top:118px; }
     @media print {
-      #actions,#loading,#error { display:none !important; }
+      #actions,#loading,#error,#chromeIosBanner { display:none !important; }
       body { padding:0 !important; }
-      .has-actions { padding-top:0 !important; }
+      .has-actions,.has-banner { padding-top:0 !important; }
     }
   </style>
 </head>
 <body>
+  <!-- Chrome trên iOS (CriOS) dùng chung engine WKWebView với Safari nhưng KHÔNG bật API
+       in ấn (window.print() không làm gì cả, kể cả bấm nút thủ công) — đây là giới hạn của
+       Chrome iOS, không phải lỗi ở đây. Cách duy nhất đáng tin cậy là mở lại link này bằng
+       Safari (dùng scheme x-safari-https:// để ép mở Safari ngay cả khi đang ở trong Chrome). -->
+  <div id="chromeIosBanner">
+    ⚠️ Chrome trên iPhone không hỗ trợ in trực tiếp từ web (giới hạn của Chrome iOS).<br>
+    Hãy mở lại bằng Safari để in được:
+    <br><a class="safari-btn" id="openSafariBtn" href="#">🧭 Mở bằng Safari</a>
+  </div>
   <div id="actions">
     <button class="secondary" id="backBtn" type="button">← Quay lại</button>
     <button id="printBtn" type="button">🖨 In</button>
@@ -61,6 +73,21 @@
   const loading = document.getElementById('loading');
   const error = document.getElementById('error');
   const actions = document.getElementById('actions');
+  const chromeIosBanner = document.getElementById('chromeIosBanner');
+
+  // CriOS = Chrome trên iOS. Trình duyệt này chạy trên engine WKWebView của Apple nhưng
+  // Google không (chưa) nối API window.print() vào hộp thoại in của hệ thống trên iOS,
+  // nên gọi window.print() ở đây — dù tự động hay bấm nút thủ công — đều không có tác dụng.
+  // Đây là giới hạn riêng của Chrome iOS (Safari iOS thì in bình thường).
+  const isChromeIos = /CriOS/i.test(navigator.userAgent);
+  if (isChromeIos) {
+    chromeIosBanner.style.display = 'block';
+    root.classList.add('has-banner');
+    actions.style.display = 'none';
+    // x-safari-https:// ép mở đúng link này bằng Safari, kể cả khi đang ở trong Chrome.
+    const safariUrl = location.href.replace(/^https:\/\//i, 'x-safari-https://').replace(/^http:\/\//i, 'x-safari-http://');
+    document.getElementById('openSafariBtn').href = safariUrl;
+  }
 
   const STORE = { address: 'Café Hồng Hoa', phone: '' };
   function esc(v) {
@@ -88,8 +115,9 @@
       if (!o) throw new Error('Không tìm thấy đơn hàng này.');
       render(o);
       loading.style.display='none';
-      // Cho Chrome iOS có đủ thời gian layout trước khi mở Print.
-      setTimeout(() => window.print(), 500);
+      // Chrome iOS: window.print() không hoạt động dù gọi kiểu gì, nên bỏ qua, chỉ hiện banner
+      // hướng dẫn mở bằng Safari (đã hiện ở trên). Các trình duyệt khác in bình thường.
+      if (!isChromeIos) setTimeout(() => window.print(), 500);
     } catch (e) { showError(e.message || 'Lỗi tải đơn hàng.'); }
   }
   function render(o) {
