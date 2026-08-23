@@ -124,6 +124,8 @@ textarea.note{width:100%;border:1.5px solid var(--line);border-radius:11px;paddi
 .confirm-box input{width:100%;border:1px solid var(--line);border-radius:10px;padding:10px;margin-bottom:14px;text-align:center}
 .confirm-actions{display:flex;gap:10px}.confirm-actions .btn{flex:1}
 .hidden{display:none !important}
+.row-flash{animation:rowFlash 1.6s ease}
+@keyframes rowFlash{0%,100%{background:transparent}15%,55%{background:#ffe6b3}}
 #printArea{display:none}
 @media print{
   body.printing .app{display:none}

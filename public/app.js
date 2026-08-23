@@ -58,12 +58,12 @@ function showConfirm(message, { title = "Xác nhận", okLabel = "Xác nhận", 
     });
   });
 }
-function showPrompt(message, { title = "Nhập thông tin", placeholder = "", type = "text" } = {}) {
+function showPrompt(message, { title = "Nhập thông tin", placeholder = "", type = "text", value = "" } = {}) {
   return new Promise((resolve) => {
     const ov = document.createElement("div"); ov.className = "confirm-overlay";
-    ov.innerHTML = `<div class="confirm-box"><h3>${esc(title)}</h3><p>${esc(message)}</p><input id="hhPromptInput" type="${type}" placeholder="${esc(placeholder)}" autocomplete="off"><div class="confirm-actions"><button class="btn light" data-a="cancel">Huỷ</button><button class="btn orange" data-a="ok">Xác nhận</button></div></div>`;
+    ov.innerHTML = `<div class="confirm-box"><h3>${esc(title)}</h3><p>${esc(message)}</p><input id="hhPromptInput" type="${type}" placeholder="${esc(placeholder)}" value="${esc(value)}" autocomplete="off"><div class="confirm-actions"><button class="btn light" data-a="cancel">Huỷ</button><button class="btn orange" data-a="ok">Xác nhận</button></div></div>`;
     document.body.appendChild(ov);
-    const input = ov.querySelector("#hhPromptInput"); input.focus();
+    const input = ov.querySelector("#hhPromptInput"); input.focus(); input.select();
     function finish(v) { ov.remove(); resolve(v); }
     input.addEventListener("keydown", (e) => { if (e.key === "Enter") finish(input.value.trim() || null); if (e.key === "Escape") finish(null); });
     ov.addEventListener("click", (e) => {
@@ -438,7 +438,7 @@ function paintAdminProducts(el, editing) {
   </div>
   <div class="panel"><h3 style="margin-top:0">Danh sách món (${menu.products.length})</h3>
     <table class="table"><tr><th>Ảnh</th><th>Món</th><th>Danh mục</th><th>Size &amp; giá</th><th>Trạng thái</th><th></th></tr>
-    ${menu.products.map((x) => `<tr>
+    ${menu.products.map((x) => `<tr id="prow-${x.id}">
       <td>${x.image ? `<img src="${esc(x.image)}" style="width:48px;height:48px;object-fit:cover;border-radius:8px">` : "—"}</td>
       <td><b>${esc(x.name)}</b></td><td>${esc(menu.categories.find((c) => c.id === x.categoryId)?.name || "")}</td>
       <td>${x.sizes.map((s) => `${esc(s.name)} ${money(s.price)}`).join(" · ")}</td>
@@ -498,10 +498,22 @@ async function saveProduct() {
     image: imgData !== undefined ? imgData : (editingProductId ? menu.products.find((x) => x.id === editingProductId).image : ""),
   };
   try {
+    let savedId = editingProductId;
     if (editingProductId) await api("PUT", "/api/admin/products/" + editingProductId, payload);
-    else await api("POST", "/api/admin/products", payload);
+    else { const created = await api("POST", "/api/admin/products", payload); savedId = created && created.id; }
     await refreshMenu(); toast("Đã lưu món.", "success"); editingProductId = null; renderAdmin();
+    if (savedId) highlightProductRow(savedId);
   } catch (e) { toast(e.message, "error"); }
+}
+/** Sau khi lưu món, danh sách bên dưới được vẽ lại toàn bộ — nếu admin đang cuộn xuống giữa
+ * danh sách dài, dòng vừa lưu có thể nằm ngoài màn hình khiến tưởng như chưa cập nhật.
+ * Cuộn tới đúng dòng đó và chớp sáng để xác nhận rõ ràng đã lưu bản mới nhất. */
+function highlightProductRow(id) {
+  const row = document.getElementById("prow-" + id);
+  if (!row) return;
+  row.scrollIntoView({ behavior: "smooth", block: "center" });
+  row.classList.add("row-flash");
+  setTimeout(() => row.classList.remove("row-flash"), 1600);
 }
 async function deleteProduct(id) {
   if (!(await showConfirm("Xoá món này? Không thể hoàn tác.", { danger: true }))) return;
@@ -546,13 +558,18 @@ function paintAdminSizes(el) {
   el.innerHTML = `<div class="panel">
     <h3 style="margin-top:0">Quản lý Size (${menu.sizeCatalog.length})</h3>
     <p style="color:var(--muted);font-size:12.5px;margin-top:0">Khai báo các loại size (VD: Nhỏ, Vừa, Lớn) một lần, rồi chọn ở tab "Món" khi thêm size cho từng món — không cần gõ lại tên size.</p>
-    <div style="display:flex;flex-wrap:wrap;gap:8px;margin-bottom:12px">${menu.sizeCatalog.map((s) => `<span class="opt selected" style="display:flex;gap:8px">${esc(s.name)}<button onclick="removeSize('${s.id}')" style="border:0;background:none;cursor:pointer;font-weight:900">✕</button></span>`).join("") || `<p class="empty" style="padding:0">Chưa có size nào.</p>`}</div>
+    <div style="display:flex;flex-wrap:wrap;gap:8px;margin-bottom:12px">${menu.sizeCatalog.map((s) => `<span class="opt selected" style="display:flex;gap:8px;align-items:center">${esc(s.name)}<button onclick="renameSize('${s.id}','${esc(s.name).replace(/'/g, "&#39;")}')" title="Sửa tên" style="border:0;background:none;cursor:pointer;font-weight:900">✎</button><button onclick="removeSize('${s.id}')" title="Xoá" style="border:0;background:none;cursor:pointer;font-weight:900">✕</button></span>`).join("") || `<p class="empty" style="padding:0">Chưa có size nào.</p>`}</div>
     <div style="display:flex;gap:8px"><input id="newSize" placeholder="Tên size mới (VD: Lớn)"><button class="btn orange" onclick="addSize()">+ Thêm</button></div>
   </div>`;
 }
 async function addSize() {
   const input = document.getElementById("newSize"); const name = input.value.trim(); if (!name) return;
   try { await api("POST", "/api/admin/sizes", { name }); await refreshMenu(); renderAdmin(); toast("Đã thêm size.", "success"); } catch (e) { toast(e.message, "error"); }
+}
+async function renameSize(id, currentName) {
+  const name = await showPrompt("Sửa tên size", { title: "Sửa tên size", value: currentName, placeholder: "Tên size" });
+  if (!name || name === currentName) return;
+  try { await api("PUT", "/api/admin/sizes/" + id, { name }); await refreshMenu(); renderAdmin(); toast("Đã sửa tên size.", "success"); } catch (e) { toast(e.message, "error"); }
 }
 async function removeSize(id) {
   if (!(await showConfirm("Xoá size này?", { danger: true }))) return;
@@ -731,9 +748,21 @@ function exportOrdersExcel() {
 /* ---- In bill / in tem ---- */
 function printHtml(html) {
   const area = document.getElementById("printArea");
+  const rootEl = document.getElementById("root");
   area.innerHTML = html;
+  // Một số trình duyệt trên điện thoại (đặc biệt luồng in qua nút Share trên iOS Safari) không áp
+  // dụng đúng/đủ quy tắc @media print — có lúc bản in ra vẫn là giao diện app thay vì bill/tem.
+  // Để chắc chắn, ẩn/hiện trực tiếp bằng inline style (không chỉ dựa vào class "printing" + CSS)
+  // — giữ cả class "printing" để tương thích các trình duyệt in đúng chuẩn @media print.
+  rootEl.style.setProperty("display", "none", "important");
+  area.style.setProperty("display", "block", "important");
   document.body.classList.add("printing");
-  function cleanup() { document.body.classList.remove("printing"); window.removeEventListener("afterprint", cleanup); }
+  function cleanup() {
+    rootEl.style.removeProperty("display");
+    area.style.removeProperty("display");
+    document.body.classList.remove("printing");
+    window.removeEventListener("afterprint", cleanup);
+  }
   window.addEventListener("afterprint", cleanup);
   // Trên điện thoại (đặc biệt iOS/Android), gọi window.print() ngay sau khi vừa đổi nội dung/CSS
   // có thể in ra trang trắng vì trình duyệt chưa kịp vẽ lại layout mới (#printArea trước đó display:none).
