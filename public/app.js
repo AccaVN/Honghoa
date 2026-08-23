@@ -25,9 +25,16 @@ const esc = (v) => String(v ?? "").replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "
 
 /* ================= tiny fetch helper ================= */
 async function api(method, url, body) {
-  const res = await fetch(url, {
+  const headers = {};
+  if (body) headers["Content-Type"] = "application/json";
+  // Dữ liệu quản trị (đặc biệt đơn hàng) phải luôn lấy bản mới nhất từ DB.
+  // Ngăn browser/Cloudflare giữ cache GET API khiến đơn mới chỉ xuất hiện sau ~30s.
+  if (method === "GET") headers["Cache-Control"] = "no-cache, no-store, must-revalidate";
+  const requestUrl = method === "GET" ? (url + (url.includes("?") ? "&" : "?") + "_=" + Date.now()) : url;
+  const res = await fetch(requestUrl, {
     method,
-    headers: body ? { "Content-Type": "application/json" } : undefined,
+    headers,
+    cache: "no-store",
     body: body ? JSON.stringify(body) : undefined,
     credentials: "same-origin",
   });
