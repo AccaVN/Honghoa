@@ -223,14 +223,14 @@ async function initDb() {
       await run("INSERT INTO toppings(id,name,price,active) VALUES (?,?,?,true)", [id, name, price]);
     }
     const defaultSizeId = uid("szc_");
-    await run("INSERT INTO sizes(id,name,sort_order) VALUES (?,?,0)", [defaultSizeId, "Size chuẩn"]);
+    await run("INSERT INTO sizes(id,name,sort_order) VALUES (?,?,0)", [defaultSizeId, "Chuẩn"]);
     for (let i = 0; i < REAL_MENU.products.length; i++) {
       const p = REAL_MENU.products[i];
       await run("INSERT INTO products(id,category_id,name,description,status,sort_order) VALUES (?,?,?,?,'active',?)", [
         p.id, p.cat, p.name, "", i,
       ]);
       await run("INSERT INTO product_sizes(id,product_id,size_id,size_name,price) VALUES (?,?,?,?,?)", [
-        uid("sz_"), p.id, defaultSizeId, "Size chuẩn", p.price,
+        uid("sz_"), p.id, defaultSizeId, "Chuẩn", p.price,
       ]);
       let tops = [];
       if (p.tops === "chung") tops = REAL_MENU.toppingSetChung;
@@ -244,6 +244,23 @@ async function initDb() {
       await run("INSERT INTO ice_levels(id,name,sort_order) VALUES (?,?,?)", [uid("ic_"), REAL_MENU.iceLevels[i], i]);
     }
     console.log("Seeded Café Hồng Hoa menu thật (categories, products, toppings, sugar/ice levels).");
+  }
+
+  // Chuẩn hóa tên size mặc định: "Size Chuẩn" -> "Chuẩn".
+  // Áp dụng cho cả database đã tồn tại, không chỉ dữ liệu seed mới.
+  const oldSize = await get("SELECT id FROM sizes WHERE name=?", ["Size Chuẩn"]);
+  const newSize = await get("SELECT id FROM sizes WHERE name=?", ["Chuẩn"]);
+  if (oldSize) {
+    if (newSize && newSize.id !== oldSize.id) {
+      // Nếu đã tồn tại cả hai tên, chuyển các món đang dùng "Size Chuẩn"
+      // sang size "Chuẩn" rồi xóa bản ghi trùng.
+      await run("UPDATE product_sizes SET size_id=?, size_name=? WHERE size_id=?", [newSize.id, "Chuẩn", oldSize.id]);
+      await run("UPDATE product_sizes SET size_name=? WHERE size_name=?", ["Chuẩn", "Size Chuẩn"]);
+      await run("DELETE FROM sizes WHERE id=?", [oldSize.id]);
+    } else {
+      await run("UPDATE sizes SET name=? WHERE id=?", ["Chuẩn", oldSize.id]);
+      await run("UPDATE product_sizes SET size_name=? WHERE size_name=?", ["Chuẩn", "Size Chuẩn"]);
+    }
   }
 
   // Di chuyển dữ liệu size cũ (nâng cấp từ bản trước khi có danh mục "sizes"): mỗi size_name
