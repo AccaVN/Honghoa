@@ -415,11 +415,7 @@ function renderAdmin() {
   </div>`;
   paintAdminBody();
 }
-function setAdminTab(t) {
-  if (t !== "orders") stopAdminOrdersPolling();
-  adminTab_ = t;
-  renderAdmin();
-}
+function setAdminTab(t) { adminTab_ = t; renderAdmin(); }
 async function paintAdminBody() {
   const el = document.getElementById("adminBody");
   if (adminTab_ === "products") return paintAdminProducts(el);
@@ -677,54 +673,7 @@ async function deleteUser(id) {
 /* ---- orders ---- */
 let collapsedOrderIds = new Set(); // đơn nào có mặt trong này thì đang thu gọn — mặc định (không có mặt) là mở chi tiết
 let lastLoadedOrders = [];
-let adminOrdersPollTimer = null;
-let adminOrdersPollBusy = false;
-let adminOrdersContainer = null;
-
-function stopAdminOrdersPolling() {
-  if (adminOrdersPollTimer) {
-    clearInterval(adminOrdersPollTimer);
-    adminOrdersPollTimer = null;
-  }
-  adminOrdersContainer = null;
-}
-
-function ordersSignature(orders) {
-  return JSON.stringify((orders || []).map((o) => ({
-    id: o.id,
-    status: o.status,
-    created_at: o.created_at,
-    updated_at: o.updated_at,
-    total: o.total,
-    itemCount: Array.isArray(o.items) ? o.items.length : 0,
-  })));
-}
-
-async function refreshAdminOrdersIfNeeded() {
-  const el = adminOrdersContainer;
-  if (!el || adminTab_ !== "orders" || !document.body.contains(el) || adminOrdersPollBusy) return;
-  adminOrdersPollBusy = true;
-  try {
-    const orders = await api("GET", "/api/orders");
-    if (ordersSignature(orders) !== ordersSignature(lastLoadedOrders)) {
-      lastLoadedOrders = orders;
-      await paintAdminOrders(el, { skipPollingStart: true });
-    }
-  } catch (_) {
-    // Một lần polling lỗi không được làm gián đoạn thao tác Admin.
-  } finally {
-    adminOrdersPollBusy = false;
-  }
-}
-
-function startAdminOrdersPolling(el) {
-  stopAdminOrdersPolling();
-  adminOrdersContainer = el;
-  refreshAdminOrdersIfNeeded();
-  adminOrdersPollTimer = setInterval(refreshAdminOrdersIfNeeded, 2000);
-}
-
-async function paintAdminOrders(el, options = {}) {
+async function paintAdminOrders(el) {
   const orders = await api("GET", "/api/orders");
   lastLoadedOrders = orders;
   const badgeClass = (s) => ({ "Mới": "s0", "Đang pha chế": "s1", "Hoàn tất": "s2", "Đã giao": "s3" }[s] || "sx");
@@ -766,7 +715,6 @@ async function paintAdminOrders(el, options = {}) {
       </div>` : ""}
     </div>`;
   }).join("")}`;
-  if (!options.skipPollingStart) startAdminOrdersPolling(el);
 }
 function toggleOrder(id) {
   if (collapsedOrderIds.has(id)) collapsedOrderIds.delete(id); else collapsedOrderIds.add(id);
@@ -826,28 +774,33 @@ function exportOrdersExcel() {
 
 /* ---- In bill / in tem ---- */
 function printHtml(html) {
-  // Luôn tạo một tài liệu in độc lập. Cách này tránh CSS/layout của trang Admin
-  // lọt vào bản in trên iPhone/Android và đặc biệt tránh in nhầm toàn bộ trang.
-  const printWindow = window.open("about:blank", "_blank");
+  // In-app print mode: replace the entire document with a standalone print document.
+  // This is more reliable on iPhone/iPad Safari than window.open()/popup fallbacks,
+  // which can cause Safari to preview the current Admin page instead of the bill.
+  const originalHtml = document.documentElement.innerHTML;
+  const originalTitle = document.title;
   const printStyles = `
-    @page { margin: 6mm; size: auto; }
+    @page { size: 72mm auto; margin: 4mm; }
     * { box-sizing: border-box; }
-    html, body { margin:0 !important; padding:0 !important; background:#fff !important; color:#000 !important; }
-    body { -webkit-print-color-adjust:exact; print-color-adjust:exact; }
-    .bill { width:72mm; max-width:72mm; margin:0 auto; font-family:'Courier New',monospace; color:#000; }
+    html, body { margin:0 !important; padding:0 !important; width:100%; background:#fff !important; color:#000 !important; }
+    body { -webkit-print-color-adjust: exact; print-color-adjust: exact; }
+    .print-document { width:72mm; max-width:72mm; margin:0 auto; padding:0; font-family:Arial,Helvetica,sans-serif; color:#000; }
+    .bill { width:100%; max-width:72mm; margin:0 auto; font-family:'Courier New',monospace; color:#000; }
     .bill h2{text-align:center;margin:0 0 2px;font-size:16px}
     .bill .bill-sub{text-align:center;font-size:10.5px;margin:0 0 8px}
     .bill hr{border:none;border-top:1px dashed #000;margin:6px 0}
     .bill-row{display:flex;justify-content:space-between;font-size:11.5px;margin:2px 0;gap:8px}
-    .bill-table{width:100%;border-collapse:collapse;margin:6px 0;font-size:11px}
+    .bill-row span:last-child{max-width:62%;text-align:right;word-break:break-word}
+    .bill-table{width:100%;border-collapse:collapse;margin:6px 0;font-size:11px;table-layout:fixed}
     .bill-table td{padding:3px 0;vertical-align:top}
+    .bill-table td:first-child{width:auto;word-break:break-word}
     .bill-table td.qty{text-align:center;width:24px}
-    .bill-table td.amt{text-align:right;white-space:nowrap}
-    .bill-item-opts{font-size:10px;color:#333}
+    .bill-table td.amt{text-align:right;width:72px;white-space:nowrap}
+    .bill-item-opts{font-size:10px;color:#333;line-height:1.25}
     .bill-total-row{display:flex;justify-content:space-between;font-size:15px;font-weight:900;margin-top:6px}
     .bill-thanks{text-align:center;margin-top:14px;font-size:11.5px}
     .labels-wrap{display:flex;flex-direction:column;gap:3mm;align-items:flex-start}
-    .label{width:6.2cm;min-height:4cm;border:1px dashed #999;padding:7px 8px;font-family:Arial,sans-serif;page-break-inside:avoid;break-inside:avoid;overflow:hidden}
+    .label{width:62mm;min-height:40mm;border:1px dashed #999;padding:7px 8px;font-family:Arial,sans-serif;page-break-inside:avoid;break-inside:avoid;overflow:hidden}
     .label-code{font-weight:900;font-size:11px;letter-spacing:.5px}
     .label-name{font-weight:800;font-size:15px;margin:3px 0 2px;line-height:1.15}
     .label-size{font-size:12px;font-weight:700}
@@ -855,33 +808,34 @@ function printHtml(html) {
     .label-top{font-size:10.5px;color:#333}
     .label-note{font-size:10.5px;font-style:italic;margin-top:3px}
   `;
-  if (printWindow) {
-    printWindow.document.open();
-    printWindow.document.write(`<!doctype html><html lang="vi"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>In Café Hồng Hoa</title><style>${printStyles}</style></head><body>${html}</body></html>`);
-    printWindow.document.close();
-    const doPrint = () => setTimeout(() => { try { printWindow.focus(); printWindow.print(); } catch (_) {} }, 150);
-    if (printWindow.document.readyState === "complete") doPrint();
-    else printWindow.addEventListener("load", doPrint, { once: true });
-    return;
-  }
 
-  // Popup bị chặn: fallback sang vùng in riêng của chính trang hiện tại.
-  const area = document.getElementById("printArea");
-  const rootEl = document.getElementById("root");
-  area.innerHTML = `<style>${printStyles}</style>${html}`;
-  rootEl.style.setProperty("display", "none", "important");
-  area.style.setProperty("display", "block", "important");
-  document.body.classList.add("printing");
-  const cleanup = () => {
-    document.body.classList.remove("printing");
-    rootEl.style.removeProperty("display");
-    area.style.removeProperty("display");
-    area.innerHTML = "";
-    window.removeEventListener("afterprint", cleanup);
+  document.title = "Café Hồng Hoa - In";
+  document.documentElement.innerHTML = `<!doctype html><html lang="vi"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Café Hồng Hoa - In</title><style>${printStyles}</style></head><body><main class="print-document">${html}</main></body></html>`;
+
+  let restored = false;
+  const restore = () => {
+    if (restored) return;
+    restored = true;
+    window.removeEventListener("afterprint", restore);
+    document.documentElement.innerHTML = originalHtml;
+    document.title = originalTitle;
+    // Re-bind the app state/UI after restoring the DOM.
+    try { boot(); } catch (_) {}
   };
-  window.addEventListener("afterprint", cleanup, { once: true });
-  requestAnimationFrame(() => requestAnimationFrame(() => { window.print(); setTimeout(cleanup, 4000); }));
+
+  window.addEventListener("afterprint", restore, { once: true });
+  setTimeout(() => {
+    try {
+      window.focus();
+      window.print();
+    } catch (_) {
+      restore();
+    }
+    // Safety fallback for browsers that don't fire afterprint.
+    setTimeout(restore, 10000);
+  }, 100);
 }
+
 function findOrder(id) { return lastLoadedOrders.find((o) => o.id === id); }
 function printBill(id) {
   const o = findOrder(id);
