@@ -157,7 +157,13 @@ function createApp(db, auth) {
     for (const it of allItems) (itemsByOrder[it.order_id] ||= []).push({ ...it, toppings: toppingsByItem[it.id] || [] });
     return orders.map((o) => ({ ...o, items: itemsByOrder[o.id] || [] }));
   }
-  app.get("/api/orders", requireRole("admin", "moderator", "staff"), h(async (req, res) => res.json(await loadOrders())));
+  app.get("/api/orders", requireRole("admin", "moderator", "staff"), h(async (req, res) => {
+    // Đơn hàng là dữ liệu realtime; tuyệt đối không để browser/CDN cache endpoint này.
+    res.set("Cache-Control", "no-store, no-cache, must-revalidate, proxy-revalidate");
+    res.set("Pragma", "no-cache");
+    res.set("Expires", "0");
+    res.json(await loadOrders());
+  }));
 
   app.patch("/api/orders/:id/status", requireRole("admin", "moderator", "staff"), h(async (req, res) => {
     const { status } = req.body || {};
