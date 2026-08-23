@@ -75,7 +75,12 @@ function createApp(db, auth) {
     }));
     return { categories, products, toppings, sugarLevels, iceLevels, sizeCatalog };
   }
-  app.get("/api/menu", h(async (req, res) => res.json(await fullMenu())));
+  app.get("/api/menu", h(async (req, res) => {
+    res.set("Cache-Control", "no-store, no-cache, must-revalidate, proxy-revalidate");
+    res.set("Pragma", "no-cache");
+    res.set("Expires", "0");
+    res.json(await fullMenu());
+  }));
 
   /* ================= ORDERS ================= */
   app.post("/api/orders", h(async (req, res) => {
@@ -286,7 +291,7 @@ function createApp(db, auth) {
     // Đồng bộ tên size đã lưu (denormalized) trên các món đang dùng size này, để danh sách món
     // và đơn hàng cũ hiển thị đúng tên mới ngay lập tức thay vì giữ tên cũ.
     await run("UPDATE product_sizes SET size_name=? WHERE size_id=?", [name, req.params.id]);
-    res.json({ ok: true });
+    res.json({ ok: true, id: req.params.id, name });
   }));
   app.delete("/api/admin/sizes/:id", requireRole("admin", "moderator"), h(async (req, res) => {
     if (await get("SELECT 1 FROM product_sizes WHERE size_id=?", [req.params.id])) {
