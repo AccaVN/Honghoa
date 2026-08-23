@@ -1,0 +1,136 @@
+<!doctype html>
+<html lang="vi">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <title>In Café Hồng Hoa</title>
+  <style>
+    @page { margin: 4mm; size: auto; }
+    * { box-sizing: border-box; }
+    html, body { margin:0; padding:0; background:#fff; color:#000; }
+    body { font-family: Arial, sans-serif; -webkit-print-color-adjust:exact; print-color-adjust:exact; }
+    .screen-bar {
+      position: sticky; top:0; z-index:10; display:flex; gap:8px;
+      padding:10px; background:#f5f5f5; border-bottom:1px solid #ddd;
+    }
+    .screen-bar button {
+      border:1px solid #999; border-radius:8px; background:#fff;
+      padding:10px 14px; font-size:16px; font-weight:700;
+    }
+    .screen-bar .primary { background:#111; color:#fff; }
+    #printContent { width:72mm; margin:12px auto; }
+    .bill { width:72mm; max-width:72mm; margin:0 auto; font-family:"Courier New",monospace; color:#000; }
+    .bill h2{text-align:center;margin:0 0 2px;font-size:16px}
+    .bill-sub{text-align:center;font-size:10.5px;margin:0 0 8px}
+    .bill hr{border:none;border-top:1px dashed #000;margin:6px 0}
+    .bill-row{display:flex;justify-content:space-between;font-size:11.5px;margin:2px 0;gap:8px}
+    .bill-table{width:100%;border-collapse:collapse;margin:6px 0;font-size:11px}
+    .bill-table td{padding:3px 0;vertical-align:top}
+    .bill-table td.qty{text-align:center;width:24px}
+    .bill-table td.amt{text-align:right;white-space:nowrap}
+    .bill-item-opts{font-size:10px;color:#333}
+    .bill-total-row{display:flex;justify-content:space-between;font-size:15px;font-weight:900;margin-top:6px}
+    .bill-thanks{text-align:center;margin-top:14px;font-size:11.5px}
+    .labels-wrap{display:flex;flex-direction:column;gap:3mm;align-items:flex-start}
+    .label{width:6.2cm;min-height:4cm;border:1px dashed #999;padding:7px 8px;font-family:Arial,sans-serif;page-break-inside:avoid;break-inside:avoid;overflow:hidden}
+    .label-code{font-weight:900;font-size:11px;letter-spacing:.5px}
+    .label-name{font-weight:800;font-size:15px;margin:3px 0 2px;line-height:1.15}
+    .label-size{font-size:12px;font-weight:700}
+    .label-opts{font-size:11px;color:#333;margin-top:2px}
+    .label-top{font-size:10.5px;color:#333}
+    .label-note{font-size:10.5px;font-style:italic;margin-top:3px}
+    .loading,.error { padding:24px; text-align:center; font-size:16px; }
+    @media print {
+      .screen-bar { display:none !important; }
+      #printContent { margin:0 auto; }
+    }
+  </style>
+</head>
+<body>
+  <div class="screen-bar">
+    <button onclick="history.back()">← Quay lại</button>
+    <button class="primary" onclick="window.print()">🖨 In</button>
+  </div>
+  <main id="printContent"><div class="loading">Đang tải nội dung in…</div></main>
+<script>
+(() => {
+  const params = new URLSearchParams(location.search);
+  const id = params.get("id");
+  const type = params.get("type") || "bill";
+  const root = document.getElementById("printContent");
+
+  const esc = (v) => String(v ?? "").replace(/[&<>"']/g, c => ({
+    "&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"
+  }[c]));
+  const money = (v) => Number(v || 0).toLocaleString("vi-VN") + "đ";
+  const store = {
+    address: "Café Hồng Hoa",
+    phone: ""
+  };
+
+  async function load() {
+    if (!id) throw new Error("Thiếu mã đơn hàng.");
+    const res = await fetch("/api/orders?print=" + encodeURIComponent(id) + "&t=" + Date.now(), {
+      cache:"no-store",
+      credentials:"same-origin",
+      headers:{"Cache-Control":"no-cache","Pragma":"no-cache"}
+    });
+    if (!res.ok) throw new Error("Không thể tải đơn hàng. Vui lòng đăng nhập Admin.");
+    const orders = await res.json();
+    const o = orders.find(x => String(x.id) === String(id));
+    if (!o) throw new Error("Không tìm thấy đơn hàng.");
+    render(o);
+  }
+
+  function render(o) {
+    if (type === "labels") {
+      const labels = [];
+      for (const it of (o.items || [])) {
+        for (let i=0; i<Number(it.quantity || 0); i++) {
+          labels.push(`<div class="label">
+            <div class="label-code">${esc(o.code)} · ${esc(o.receive_type)}${o.table_or_address ? " " + esc(o.table_or_address) : ""}</div>
+            <div class="label-name">${esc(it.product_name)}</div>
+            <div class="label-size">Size ${esc(it.size_name)}</div>
+            <div class="label-opts">${esc(it.sugar)} · ${esc(it.ice)}</div>
+            ${it.toppings?.length ? `<div class="label-top">+ ${it.toppings.map(t=>esc(t.name)).join(", ")}</div>` : ""}
+            ${it.note ? `<div class="label-note">Ghi chú: ${esc(it.note)}</div>` : ""}
+          </div>`);
+        }
+      }
+      root.innerHTML = `<div class="labels-wrap">${labels.join("")}</div>`;
+    } else {
+      root.innerHTML = `<div class="bill">
+        <h2>Café Hồng Hoa</h2>
+        <p class="bill-sub">${esc(store.address)}${store.phone ? "<br>ĐT: "+esc(store.phone) : ""}</p>
+        <hr>
+        <div class="bill-row"><span>Mã đơn</span><strong>${esc(o.code)}</strong></div>
+        <div class="bill-row"><span>Thời gian</span><span>${new Date(o.created_at).toLocaleString("vi-VN")}</span></div>
+        <div class="bill-row"><span>Khách hàng</span><span>${esc(o.customer_name)}</span></div>
+        <div class="bill-row"><span>Hình thức</span><span>${esc(o.receive_type)}${o.table_or_address ? " · " + esc(o.table_or_address) : ""}</span></div>
+        <hr>
+        <table class="bill-table">
+          <tr><td><b>Món</b></td><td class="qty"><b>SL</b></td><td class="amt"><b>T.Tiền</b></td></tr>
+          ${(o.items||[]).map(it => `<tr>
+            <td>${esc(it.product_name)} (${esc(it.size_name)})${it.toppings?.length ? `<div class="bill-item-opts">+ ${it.toppings.map(t=>esc(t.name)).join(", ")}</div>` : ""}${it.sugar || it.ice ? `<div class="bill-item-opts">${esc(it.sugar)} · ${esc(it.ice)}</div>` : ""}</td>
+            <td class="qty">${esc(it.quantity)}</td>
+            <td class="amt">${money(it.subtotal)}</td>
+          </tr>`).join("")}
+        </table>
+        <hr>
+        <div class="bill-total-row"><span>Tổng cộng</span><span>${money(o.total)}</span></div>
+        <p class="bill-thanks">Cảm ơn quý khách — hẹn gặp lại!</p>
+      </div>`;
+    }
+
+    // Do not auto-print. iOS Safari is much more reliable when the user taps
+    // the Print button on the actual dedicated document.
+    document.title = type === "labels" ? "Tem pha chế - " + (o.code || "") : "Bill - " + (o.code || "");
+  }
+
+  load().catch(err => {
+    root.innerHTML = '<div class="error">' + esc(err.message) + '<br><br><button onclick="history.back()">Quay lại</button></div>';
+  });
+})();
+</script>
+</body>
+</html>

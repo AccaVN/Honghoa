@@ -774,132 +774,28 @@ function exportOrdersExcel() {
 
 /* ---- In bill / in tem ---- */
 function printHtml(html) {
-  /*
-   * iPhone/iPad Safari: window.open() + print() can print the opener/Admin page
-   * instead of the popup document. To avoid that completely, replace the current
-   * document with a print-only document, print it, then reload the app afterward.
-   */
-  const printStyles = `
-    @page { margin: 6mm; size: auto; }
-    * { box-sizing: border-box; }
-    html, body { margin:0 !important; padding:0 !important; background:#fff !important; color:#000 !important; }
-    body { -webkit-print-color-adjust: exact; print-color-adjust: exact; }
-    .print-page { width:100%; margin:0; }
-    .bill { width:72mm; max-width:72mm; margin:0 auto; font-family:'Courier New',monospace; color:#000; }
-    .bill h2{text-align:center;margin:0 0 2px;font-size:16px}
-    .bill .bill-sub{text-align:center;font-size:10.5px;margin:0 0 8px}
-    .bill hr{border:none;border-top:1px dashed #000;margin:6px 0}
-    .bill-row{display:flex;justify-content:space-between;font-size:11.5px;margin:2px 0;gap:8px}
-    .bill-table{width:100%;border-collapse:collapse;margin:6px 0;font-size:11px}
-    .bill-table td{padding:3px 0;vertical-align:top}
-    .bill-table td.qty{text-align:center;width:24px}
-    .bill-table td.amt{text-align:right;white-space:nowrap}
-    .bill-item-opts{font-size:10px;color:#333}
-    .bill-total-row{display:flex;justify-content:space-between;font-size:15px;font-weight:900;margin-top:6px}
-    .bill-thanks{text-align:center;margin-top:14px;font-size:11.5px}
-    .labels-wrap{display:flex;flex-direction:column;gap:3mm;align-items:flex-start}
-    .label{width:6.2cm;min-height:4cm;border:1px dashed #999;padding:7px 8px;font-family:Arial,sans-serif;page-break-inside:avoid;break-inside:avoid;overflow:hidden}
-    .label-code{font-weight:900;font-size:11px;letter-spacing:.5px}
-    .label-name{font-weight:800;font-size:15px;margin:3px 0 2px;line-height:1.15}
-    .label-size{font-size:12px;font-weight:700}
-    .label-opts{font-size:11px;color:#333;margin-top:2px}
-    .label-top{font-size:10.5px;color:#333}
-    .label-note{font-size:10.5px;font-style:italic;margin-top:3px}
-    .print-back {
-      position:fixed; top:12px; right:12px; z-index:99999;
-      border:1px solid #bbb; border-radius:8px; background:#fff;
-      padding:8px 12px; font:14px Arial,sans-serif; color:#111;
-    }
-    @media print {
-      .print-back { display:none !important; }
-    }
-  `;
-
-  // Build the print-only document in the SAME tab. This is intentional:
-  // iOS Safari can ignore a popup's document and print the opener instead.
-  document.open();
-  document.write(`<!doctype html>
-<html lang="vi">
-<head>
-<meta charset="utf-8">
-<meta name="viewport" content="width=device-width,initial-scale=1">
-<title>In Café Hồng Hoa</title>
-<style>${printStyles}</style>
-</head>
-<body>
-<button class="print-back" onclick="location.reload()">← Quay lại quản lý</button>
-<div class="print-page">${html}</div>
-</body>
-</html>`);
-  document.close();
-
-  // Give Safari one render cycle before opening the native print sheet.
-  const startPrint = () => {
-    setTimeout(() => {
-      try {
-        window.focus();
-        window.print();
-      } catch (_) {}
-    }, 500);
-  };
-
-  // Reload the original application after the print sheet closes.
-  let restored = false;
-  const restoreApp = () => {
-    if (restored) return;
-    restored = true;
-    setTimeout(() => location.reload(), 100);
-  };
-  window.addEventListener("afterprint", restoreApp, { once: true });
-
-  if (document.readyState === "complete") startPrint();
-  else window.addEventListener("load", startPrint, { once: true });
+  // iPhone/Safari: do NOT use window.print() from the Admin document.
+  // Navigate to a dedicated static print document instead. Safari then prints
+  // only that document, never the Admin page.
+  // `html` is kept only for compatibility with existing callers.
+  return html;
 }
 function findOrder(id) { return lastLoadedOrders.find((o) => o.id === id); }
+function openDedicatedPrint(id, type) {
+  const url = `/print.html?type=${encodeURIComponent(type)}&id=${encodeURIComponent(id)}&v=${Date.now()}`;
+  // Same-tab navigation is intentional: iOS Safari may block/print the opener
+  // when a popup is used. The dedicated page is the actual print document.
+  window.location.assign(url);
+}
 function printBill(id) {
   const o = findOrder(id);
   if (!o) return;
-  const html = `<div class="bill">
-    <h2>Café Hồng Hoa</h2>
-    <p class="bill-sub">${esc(STORE_INFO.address)}<br>ĐT: ${esc(STORE_INFO.phoneDisplay)}</p>
-    <hr>
-    <div class="bill-row"><span>Mã đơn</span><strong>${esc(o.code)}</strong></div>
-    <div class="bill-row"><span>Thời gian</span><span>${new Date(o.created_at).toLocaleString("vi-VN")}</span></div>
-    <div class="bill-row"><span>Khách hàng</span><span>${esc(o.customer_name)}</span></div>
-    <div class="bill-row"><span>Hình thức</span><span>${esc(o.receive_type)}${o.table_or_address ? " · " + esc(o.table_or_address) : ""}</span></div>
-    <hr>
-    <table class="bill-table">
-      <tr><td><b>Món</b></td><td class="qty"><b>SL</b></td><td class="amt"><b>T.Tiền</b></td></tr>
-      ${o.items.map((it) => `
-      <tr>
-        <td>${esc(it.product_name)} (${esc(it.size_name)})${it.toppings.length ? `<div class="bill-item-opts">+ ${it.toppings.map((t) => esc(t.name)).join(", ")}</div>` : ""}${it.sugar || it.ice ? `<div class="bill-item-opts">${esc(it.sugar)} · ${esc(it.ice)}</div>` : ""}</td>
-        <td class="qty">${it.quantity}</td>
-        <td class="amt">${money(it.subtotal)}</td>
-      </tr>`).join("")}
-    </table>
-    <hr>
-    <div class="bill-total-row"><span>Tổng cộng</span><span>${money(o.total)}</span></div>
-    <p class="bill-thanks">Cảm ơn quý khách — hẹn gặp lại!</p>
-  </div>`;
-  printHtml(html);
+  openDedicatedPrint(id, "bill");
 }
 function printLabels(id) {
   const o = findOrder(id);
   if (!o) return;
-  const labels = [];
-  for (const it of o.items) {
-    for (let i = 0; i < it.quantity; i++) {
-      labels.push(`<div class="label">
-        <div class="label-code">${esc(o.code)} · ${esc(o.receive_type)}${o.table_or_address ? " " + esc(o.table_or_address) : ""}</div>
-        <div class="label-name">${esc(it.product_name)}</div>
-        <div class="label-size">Size ${esc(it.size_name)}</div>
-        <div class="label-opts">${esc(it.sugar)} · ${esc(it.ice)}</div>
-        ${it.toppings.length ? `<div class="label-top">+ ${it.toppings.map((t) => esc(t.name)).join(", ")}</div>` : ""}
-        ${it.note ? `<div class="label-note">Ghi chú: ${esc(it.note)}</div>` : ""}
-      </div>`);
-    }
-  }
-  printHtml(`<div class="labels-wrap">${labels.join("")}</div>`);
+  openDedicatedPrint(id, "labels");
 }
 
 boot();
