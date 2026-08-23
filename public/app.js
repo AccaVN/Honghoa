@@ -415,7 +415,11 @@ function renderAdmin() {
   </div>`;
   paintAdminBody();
 }
-function setAdminTab(t) { adminTab_ = t; renderAdmin(); }
+function setAdminTab(t) {
+  if (t !== "orders") stopAdminOrdersPolling();
+  adminTab_ = t;
+  renderAdmin();
+}
 async function paintAdminBody() {
   const el = document.getElementById("adminBody");
   if (adminTab_ === "products") return paintAdminProducts(el);
@@ -673,7 +677,54 @@ async function deleteUser(id) {
 /* ---- orders ---- */
 let collapsedOrderIds = new Set(); // đơn nào có mặt trong này thì đang thu gọn — mặc định (không có mặt) là mở chi tiết
 let lastLoadedOrders = [];
-async function paintAdminOrders(el) {
+let adminOrdersPollTimer = null;
+let adminOrdersPollBusy = false;
+let adminOrdersContainer = null;
+
+function stopAdminOrdersPolling() {
+  if (adminOrdersPollTimer) {
+    clearInterval(adminOrdersPollTimer);
+    adminOrdersPollTimer = null;
+  }
+  adminOrdersContainer = null;
+}
+
+function ordersSignature(orders) {
+  return JSON.stringify((orders || []).map((o) => ({
+    id: o.id,
+    status: o.status,
+    created_at: o.created_at,
+    updated_at: o.updated_at,
+    total: o.total,
+    itemCount: Array.isArray(o.items) ? o.items.length : 0,
+  })));
+}
+
+async function refreshAdminOrdersIfNeeded() {
+  const el = adminOrdersContainer;
+  if (!el || adminTab_ !== "orders" || !document.body.contains(el) || adminOrdersPollBusy) return;
+  adminOrdersPollBusy = true;
+  try {
+    const orders = await api("GET", "/api/orders");
+    if (ordersSignature(orders) !== ordersSignature(lastLoadedOrders)) {
+      lastLoadedOrders = orders;
+      await paintAdminOrders(el, { skipPollingStart: true });
+    }
+  } catch (_) {
+    // Một lần polling lỗi không được làm gián đoạn thao tác Admin.
+  } finally {
+    adminOrdersPollBusy = false;
+  }
+}
+
+function startAdminOrdersPolling(el) {
+  stopAdminOrdersPolling();
+  adminOrdersContainer = el;
+  refreshAdminOrdersIfNeeded();
+  adminOrdersPollTimer = setInterval(refreshAdminOrdersIfNeeded, 2000);
+}
+
+async function paintAdminOrders(el, options = {}) {
   const orders = await api("GET", "/api/orders");
   lastLoadedOrders = orders;
   const badgeClass = (s) => ({ "Mới": "s0", "Đang pha chế": "s1", "Hoàn tất": "s2", "Đã giao": "s3" }[s] || "sx");
@@ -715,6 +766,7 @@ async function paintAdminOrders(el) {
       </div>` : ""}
     </div>`;
   }).join("")}`;
+  if (!options.skipPollingStart) startAdminOrdersPolling(el);
 }
 function toggleOrder(id) {
   if (collapsedOrderIds.has(id)) collapsedOrderIds.delete(id); else collapsedOrderIds.add(id);
@@ -773,29 +825,21 @@ function exportOrdersExcel() {
 }
 
 /* ---- In bill / in tem ---- */
-function printHtml(html) {
-  // iPhone/Safari: do NOT use window.print() from the Admin document.
-  // Navigate to a dedicated static print document instead. Safari then prints
-  // only that document, never the Admin page.
-  // `html` is kept only for compatibility with existing callers.
-  return html;
-}
-function findOrder(id) { return lastLoadedOrders.find((o) => o.id === id); }
-function openDedicatedPrint(id, type) {
-  const url = `/print.html?type=${encodeURIComponent(type)}&id=${encodeURIComponent(id)}&v=${Date.now()}`;
-  // Same-tab navigation is intentional: iOS Safari may block/print the opener
-  // when a popup is used. The dedicated page is the actual print document.
+// Chrome/Safari trên iPhone có thể bỏ qua popup document.write() và vẫn in document Admin.
+// Vì vậy KHÔNG dùng window.open/window.print từ trang Admin. Thay vào đó chuyển sang
+// một tài liệu HTML riêng cùng origin; print.html sẽ tự tải đúng đơn rồi gọi print().
+function openPrintDocument(id, type) {
+  const url = `/print.html?type=${encodeURIComponent(type)}&id=${encodeURIComponent(id)}&t=${Date.now()}`;
   window.location.assign(url);
 }
+function findOrder(id) { return lastLoadedOrders.find((o) => o.id === id); }
 function printBill(id) {
-  const o = findOrder(id);
-  if (!o) return;
-  openDedicatedPrint(id, "bill");
+  if (!findOrder(id)) return toast("Không tìm thấy đơn hàng.", "error");
+  openPrintDocument(id, "bill");
 }
 function printLabels(id) {
-  const o = findOrder(id);
-  if (!o) return;
-  openDedicatedPrint(id, "labels");
+  if (!findOrder(id)) return toast("Không tìm thấy đơn hàng.", "error");
+  openPrintDocument(id, "labels");
 }
 
 boot();
