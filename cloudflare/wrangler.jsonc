@@ -1,0 +1,38 @@
+{
+  "$schema": "node_modules/wrangler/config-schema.json",
+  "name": "cafe-hong-hoa",
+  "main": "src/worker.mjs",
+  "compatibility_date": "2026-08-23",
+  "compatibility_flags": ["nodejs_compat"],
+
+  // Cookie đăng nhập admin cần secure:true khi chạy production (xem app-core.js) — Workers luôn
+  // phục vụ qua https nên đặt sẵn ở đây (không cần .env riêng như bản Render).
+  "vars": {
+    "NODE_ENV": "production"
+  },
+
+  // File tĩnh (index.html, app.js, assets/*.png) lấy thẳng từ thư mục public/ của bản Render,
+  // không cần copy — Cloudflare tự phục vụ, không tốn lượt gọi Worker cho các file này.
+  // not_found_handling: mọi đường dẫn không khớp file tĩnh nào sẽ trả về index.html (kiểu SPA),
+  // giống hệt hành vi catch-all "sendFile(index.html)" ở cuối server.js bản Render.
+  // run_worker_first: CHỈ /api/* mới thật sự chạy vào Worker (worker.mjs) — mọi request khác
+  // được Cloudflare trả trực tiếp từ file tĩnh, không tốn CPU/lượt gọi Worker.
+  "assets": {
+    "directory": "../public",
+    "binding": "ASSETS",
+    "not_found_handling": "single-page-application",
+    "run_worker_first": ["/api/*"]
+  },
+
+  // Tạo bằng lệnh: npx wrangler hyperdrive create hong-hoa-db --connection-string="<chuỗi Neon của bạn>"
+  // rồi thay "id" bên dưới bằng id lệnh đó trả về (xem cloudflare/README.md).
+  "hyperdrive": [
+    {
+      "binding": "HYPERDRIVE",
+      "id": "REPLACE_WITH_HYPERDRIVE_ID"
+      // Khi chạy thử local (npx wrangler dev), có thể thêm dòng dưới để trỏ thẳng vào Postgres
+      // của máy bạn thay vì Hyperdrive thật (không bắt buộc):
+      // "localConnectionString": "postgresql://user:password@localhost:5432/dbname"
+    }
+  ]
+}

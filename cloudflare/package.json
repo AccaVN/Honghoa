@@ -1,0 +1,13 @@
+{
+  "name": "hh-server-cloudflare",
+  "private": true,
+  "version": "1.0.0",
+  "description": "Deploy Café Hồng Hoa lên Cloudflare Workers (thay cho Render) — xem README.md trong thư mục này.",
+  "scripts": {
+    "dev": "wrangler dev",
+    "deploy": "wrangler deploy"
+  },
+  "devDependencies": {
+    "wrangler": "^4"
+  }
+}
